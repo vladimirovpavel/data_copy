@@ -10,8 +10,10 @@ import (
 
 var TESTFILENAME string = "c:\\temp\\test_file1.txt"
 var TESTFILENAME2 string = "c:\\temp\\test_file2.txt"
+var LINUXTESTFILENAME string = "/home/user/golang/tests/test_file1.txt"
+var LINUXTESTFILENAME2 string = "/home/user/golang/tests/test_file2.txt"
 var TESTFILESIZE = 500
-var TESTFILESIZE2 = 16123534
+var TESTFILESIZE2 = 1024 * 1024
 
 func createTestFile(name string, len int32) error {
 	f, err := os.Create(name)
@@ -39,11 +41,11 @@ func TestCheckRead(t *testing.T) {
 	notExistingCF := CopyFile{path: "c:\\temp\\not_existing_file.txt"}
 	require.Error(t, notExistingCF.checkRead(offset, &count), "Not existing filename")
 
-	err := createTestFile(TESTFILENAME, int32(TESTFILESIZE))
+	err := createTestFile(LINUXTESTFILENAME, int32(TESTFILESIZE))
 	if err != nil {
 		t.Fatalf("Error on creating test file: :%v", err)
 	}
-	fr := CopyFile{path: TESTFILENAME}
+	fr := CopyFile{path: LINUXTESTFILENAME}
 	defer fr.handle.Close()
 
 	tests := map[struct{ offset, count uint64 }]bool{
@@ -79,12 +81,15 @@ func TestCheckWrite(t *testing.T) {
 	notExistingCF.handle.Close()
 	os.Remove("c:\\temp\\not_existing_file.txt")
 
-	fw := CopyFile{path: TESTFILENAME}
+	fw := CopyFile{path: LINUXTESTFILENAME}
 	require.Nil(t, fw.checkWrite(), "Testing open file for write")
 	fw.handle.Close()
 
-	fw = CopyFile{path: "c:\\file.txt"}
-	require.Error(t, fw.checkWrite(), "Testing create file in c:\\")
+	//fw = CopyFile{path: "c:\\file.txt"}
+	//require.Error(t, fw.checkWrite(), "Testing create file in c:\\")
+	fw = CopyFile{path: "/etc/file.txt"}
+	require.Error(t, fw.checkWrite(), "Testing create file in /etc/")
+
 	fw.handle.Close()
 }
 
@@ -93,24 +98,30 @@ func TestProgessPrint(t *testing.T) {
 }
 
 func TestCopy(t *testing.T) {
-	require.Error(t, Copy("c:\\file.txt", "c:\\file2.txt", 0, 100), "Open not existing file and try to write to forbidden dir")
+	//require.Error(t, Copy("c:\\file.txt", "c:\\file2.txt", 0, 100), "Open not existing file and try to write to forbidden dir")
+	require.Error(t, Copy("/home/user/some_src_file", "/home/user/some_dst_file", 0, 100), "Open not existing file and try to write to forbidden dir")
 
-	err := createTestFile(TESTFILENAME, int32(TESTFILESIZE))
+	err := Copy("/home/user/test-file", "/home/user/dst_file", 100, 0)
+	if err != nil {
+		t.Fatalf("Error copying big file")
+	}
+
+	err = createTestFile(LINUXTESTFILENAME, int32(TESTFILESIZE))
 	if err != nil {
 		t.Fatalf("Error on creating file: %v", err)
 	}
-	require.Error(t, Copy(TESTFILENAME, "c:\\file.txt", 0, 10000), "Try to copy existing file to forbidden place")
+	require.Error(t, Copy(LINUXTESTFILENAME, "/etc/test.txt", 0, 10000), "Try to copy existing file to forbidden place")
 
-	err = createTestFile(TESTFILENAME, int32(TESTFILESIZE2))
+	err = createTestFile(LINUXTESTFILENAME, int32(TESTFILESIZE2))
 	if err != nil {
 		t.Fatalf("ERror on creating temp file: %v", err)
 	}
-	err = Copy(TESTFILENAME, TESTFILENAME2, 0, 100000000)
+	err = Copy(LINUXTESTFILENAME, LINUXTESTFILENAME, 0, 100000000)
 	if err != nil {
 		t.Fatalf("Error on copy files: %v", err)
 	}
 
-	f, err := os.OpenFile(TESTFILENAME2, os.O_RDONLY, 0666)
+	f, err := os.OpenFile(LINUXTESTFILENAME, os.O_RDONLY, 0666)
 	if err != nil {
 		t.Fatalf("Error open writed file for test it size")
 	}
@@ -120,6 +131,6 @@ func TestCopy(t *testing.T) {
 	}
 	require.Equal(t, writedFileState.Size(), int64(TESTFILESIZE2), "Testing then len(writed file) == len(source file)")
 	f.Close()
-	os.Remove(TESTFILENAME)
-	os.Remove(TESTFILENAME2)
+	os.Remove(LINUXTESTFILENAME)
+	os.Remove(LINUXTESTFILENAME)
 }

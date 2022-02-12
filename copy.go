@@ -7,6 +7,8 @@ import (
 	"io"
 	"os"
 	"sync"
+
+	"github.com/cheggaaa/pb/v3"
 )
 
 const bufSize = 1024
@@ -57,23 +59,14 @@ func (c *CopyFile) checkWrite() error {
 	return nil
 }
 
-//Receives current size from currentSize channel. allSize - to print it
-func ProgessPrint(currentSize <-chan int, allSize uint64) {
-	for progress := range currentSize {
-		fmt.Printf("%d \\ %d\n", progress, allSize)
-	}
-	fmt.Println("File was writed")
-}
-
 //Works func. Creates buf for read and write.
 //In cycle read data from source, write to Dest
 //If progress + bufSize > limit (buf more than bytes to read) - creates new buf to read data.
 //In end of each iterationg throw progress to chan (to ProgressPrint)
-func copy(sourceCopyFile *CopyFile, destCopyFile *CopyFile, currentSize chan<- int, limit uint64) error {
+func copy(sourceCopyFile *CopyFile, destCopyFile *CopyFile, limit uint64) error {
 	progress := 0
 	buf := make([]byte, bufSize)
-	currentSize <- progress
-	defer close(currentSize)
+	bar := pb.StartNew(int(limit))
 
 	for progress < int(limit) {
 		//ERRORS, EOF
@@ -92,8 +85,9 @@ func copy(sourceCopyFile *CopyFile, destCopyFile *CopyFile, currentSize chan<- i
 			return fmt.Errorf("error, writed %d bytes, less then readed %d", writed, readed)
 		}
 		progress += readed
-		currentSize <- progress
+		bar.Add(bufSize)
 	}
+	bar.Finish()
 	return nil
 
 }
@@ -126,20 +120,13 @@ func Copy(source string, dest string, offset uint64, count uint64) error {
 		count = sourceCopyFile.len - offset
 	}
 
-	progressChan := make(chan int)
 	var wg sync.WaitGroup
 
 	wg.Add(1)
-	go func(ch chan int, from_cf *CopyFile, to_cf *CopyFile, count uint64) {
+	go func(from_cf *CopyFile, to_cf *CopyFile, count uint64) {
 		defer wg.Done()
-		copy(from_cf, to_cf, ch, count)
-	}(progressChan, sourceCopyFile, destCopyFile, count)
-
-	wg.Add(1)
-	go func(ch chan int) {
-		defer wg.Done()
-		ProgessPrint(ch, count)
-	}(progressChan)
+		copy(from_cf, to_cf, count)
+	}(sourceCopyFile, destCopyFile, count)
 
 	wg.Wait()
 
