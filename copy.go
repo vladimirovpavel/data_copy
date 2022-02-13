@@ -14,14 +14,22 @@ import (
 const bufSize = 1024
 
 //struct for file instance. Contains path, len, handle to file
-type CopyFile struct {
+type structFile struct {
 	path   string
 	len    uint64
 	handle *os.File
 }
 
+func (sf *structFile) Close() error {
+	err := sf.handle.Close()
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 // open file for read, check it size, compare with requested count. Saves handle to c.handle
-func (c *CopyFile) checkRead(offset uint64, count *uint64) error {
+func (c *structFile) checkRead(offset uint64, count *uint64) error {
 	handle, err := os.OpenFile(c.path, os.O_RDONLY, 0222)
 	if err != nil {
 		err = fmt.Errorf("error on file %s for read %v", c.path, err)
@@ -30,6 +38,7 @@ func (c *CopyFile) checkRead(offset uint64, count *uint64) error {
 	fi, err := handle.Stat()
 	if err != nil {
 		err = fmt.Errorf("error in getting stat of file")
+		handle.Close()
 		return err
 	}
 	c.handle = handle
@@ -37,6 +46,7 @@ func (c *CopyFile) checkRead(offset uint64, count *uint64) error {
 
 	if offset > c.len {
 		err = fmt.Errorf("wants read from offset %d, but file len is %d", offset, c.len)
+		handle.Close()
 		return err
 	}
 
@@ -49,7 +59,7 @@ func (c *CopyFile) checkRead(offset uint64, count *uint64) error {
 }
 
 // Open file to write, saves handle to c.handle. Throw err if error
-func (c *CopyFile) checkWrite() error {
+func (c *structFile) checkWrite() error {
 	handle, err := os.OpenFile(c.path, os.O_WRONLY|os.O_CREATE, 0666)
 	if err != nil {
 		err = fmt.Errorf("error on open file %s for write %v", c.path, err)
@@ -63,7 +73,7 @@ func (c *CopyFile) checkWrite() error {
 //In cycle read data from source, write to Dest
 //If progress + bufSize > limit (buf more than bytes to read) - creates new buf to read data.
 //In end of each iterationg throw progress to chan (to ProgressPrint)
-func copy(sourceCopyFile *CopyFile, destCopyFile *CopyFile, limit uint64) error {
+func copy(sourceCopyFile *structFile, destCopyFile *structFile, limit uint64) error {
 	progress := 0
 	buf := make([]byte, bufSize)
 	bar := pb.StartNew(int(limit))
@@ -100,8 +110,8 @@ func copy(sourceCopyFile *CopyFile, destCopyFile *CopyFile, limit uint64) error 
 //ProgressPrint starts in other gorutine
 //created WaitGroup, waits after copy is ending
 func Copy(source string, dest string, offset uint64, count uint64) error {
-	sourceCopyFile := &CopyFile{path: source}
-	destCopyFile := &CopyFile{path: dest}
+	sourceCopyFile := &structFile{path: source}
+	destCopyFile := &structFile{path: dest}
 
 	from_err := sourceCopyFile.checkRead(offset, &count)
 	if from_err != nil {
@@ -112,8 +122,8 @@ func Copy(source string, dest string, offset uint64, count uint64) error {
 	if to_err != nil {
 		return to_err
 	}
-	defer sourceCopyFile.handle.Close()
-	defer destCopyFile.handle.Close()
+	defer sourceCopyFile.Close()
+	defer destCopyFile.Close()
 
 	if summ := offset + count; summ > sourceCopyFile.len {
 		fmt.Printf("warning: count of bytes off the source file boundaries by %d. Read to EOF\n", summ-sourceCopyFile.len)
@@ -123,7 +133,7 @@ func Copy(source string, dest string, offset uint64, count uint64) error {
 	var wg sync.WaitGroup
 
 	wg.Add(1)
-	go func(from_cf *CopyFile, to_cf *CopyFile, count uint64) {
+	go func(from_cf *structFile, to_cf *structFile, count uint64) {
 		defer wg.Done()
 		copy(from_cf, to_cf, count)
 	}(sourceCopyFile, destCopyFile, count)

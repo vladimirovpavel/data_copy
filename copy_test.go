@@ -3,19 +3,65 @@ package main
 //CHECKS TYPES OF INT/UINT
 import (
 	"os"
+	"os/user"
+	"path"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
-var TESTFILENAME string = "c:\\temp\\test_file1.txt"
-var TESTFILENAME2 string = "c:\\temp\\test_file2.txt"
-var LINUXTESTFILENAME string = "/home/user/golang/tests/test_file1.txt"
-var LINUXTESTFILENAME2 string = "/home/user/golang/tests/test_file2.txt"
-var TESTFILESIZE = 500
-var TESTFILESIZE2 = 1024 * 1024
+var WIN_WRONG_FILENAME string = "c:\\wrong_file_name"
+var LINUX_WRONG_FILENAME string = "/dev/wrong_file_name"
 
-func createTestFile(name string, len int32) error {
+var testFiles = []struct {
+	name string
+	size uint64
+}{
+	{name: "small_test_file", size: 500},
+	{name: "big_test_file", size: 1024 * 1024 * 100}}
+
+const OS_LINUX int = 1
+const OS_WINDOWS int = 2
+
+var os_type int = OS_LINUX
+
+func getWrongName(os_type int) string {
+	wrong_name := ""
+	if os_type == OS_LINUX {
+		wrong_name = LINUX_WRONG_FILENAME
+	} else if os_type == OS_WINDOWS {
+		wrong_name = WIN_WRONG_FILENAME
+	}
+	return wrong_name
+}
+
+func cleanupTestEnviromnent(workDir string) error {
+	err := os.RemoveAll(workDir)
+	return err
+}
+
+func createTestEnviromnent() (string, error) {
+	//TEST working ON WINDOWS
+	usr, err := user.Current()
+	if err != nil {
+		return "", err
+	}
+	workDir := path.Join(usr.HomeDir, "tests")
+	err = os.MkdirAll(workDir, 0777)
+	if err != nil {
+		return "", err
+	}
+
+	for _, testFile := range testFiles {
+		err = createTestFile(path.Join(workDir, testFile.name), testFile.size)
+		if err != nil {
+			return "", err
+		}
+	}
+	return workDir, err
+}
+
+func createTestFile(name string, len uint64) error {
 	f, err := os.Create(name)
 	if err != nil {
 		return err
@@ -33,20 +79,23 @@ func createTestFile(name string, len int32) error {
 }
 
 func TestCheckRead(t *testing.T) {
+	workDir, err := createTestEnviromnent()
+	if err != nil {
+		t.Fatalf("Error on create test enviromnent")
+	}
+
+	wrongName := getWrongName(os_type)
 	var offset, count uint64
-	// EMPTY FILENAME
-	emptyNameCF := CopyFile{path: ""}
+
+	emptyNameCF := structFile{path: ""}
 	require.Error(t, emptyNameCF.checkRead(offset, &count), "Empty filename")
-	//NOT EXIST FILENAME
-	notExistingCF := CopyFile{path: "c:\\temp\\not_existing_file.txt"}
+
+	notExistingCF := structFile{path: wrongName}
 	require.Error(t, notExistingCF.checkRead(offset, &count), "Not existing filename")
 
-	err := createTestFile(LINUXTESTFILENAME, int32(TESTFILESIZE))
-	if err != nil {
-		t.Fatalf("Error on creating test file: :%v", err)
-	}
-	fr := CopyFile{path: LINUXTESTFILENAME}
-	defer fr.handle.Close()
+	testFile := testFiles[0]
+	fileRead := structFile{path: path.Join(workDir, testFile.name)}
+	defer fileRead.Close()
 
 	tests := map[struct{ offset, count uint64 }]bool{
 		{0, 10}:    true,  //normal reading
@@ -58,70 +107,73 @@ func TestCheckRead(t *testing.T) {
 	}
 	for test_case, result := range tests {
 		if !result {
-			require.Error(t, fr.checkRead(test_case.offset, &test_case.count), "Testing offset off the input file")
+			require.Error(t, fileRead.checkRead(test_case.offset, &test_case.count), "Testing offset %d off the input file", offset)
 		} else {
-			require.Nil(t, fr.checkRead(test_case.offset, &test_case.count), "Testing offset %d, count %d", offset, count)
+			require.Nil(t, fileRead.checkRead(test_case.offset, &test_case.count), "Testing offset %d, count %d", offset, count)
 		}
 	}
 	//checks count == len(file) - offset if count == 0
 
 	offset, count = 10, 0
-	fr.checkRead(offset, &count)
-	require.Equal(t, count, uint64(TESTFILESIZE-int(offset)), "Checks that count == 0 is setted to FILESIZE - offset")
+	fileRead.checkRead(offset, &count)
+	require.Equal(t, count, uint64(uint64(testFile.size)-offset), "Checks that count == 0 is setted to FILESIZE - offset")
 
+	cleanupTestEnviromnent(workDir)
 }
 
 func TestCheckWrite(t *testing.T) {
+	workDir, err := createTestEnviromnent()
+	if err != nil {
+		t.Fatalf("error creating test enviromnent %v", err)
+	}
+	wrongName := getWrongName(os_type)
+	testFile := testFiles[0]
 
-	emptyFilenameCF := CopyFile{path: ""}
+	emptyFilenameCF := structFile{path: ""}
 	require.Error(t, emptyFilenameCF.checkWrite(), "Empty filename")
 
-	notExistingCF := CopyFile{path: "c:\\temp\\not_existing_file.txt"}
+	notExistingCF := structFile{path: path.Join(workDir, testFile.name+"_writed")}
 	require.Nil(t, notExistingCF.checkWrite(), "Not existing filename")
-	notExistingCF.handle.Close()
-	os.Remove("c:\\temp\\not_existing_file.txt")
+	notExistingCF.Close()
 
-	fw := CopyFile{path: LINUXTESTFILENAME}
-	require.Nil(t, fw.checkWrite(), "Testing open file for write")
-	fw.handle.Close()
-
-	//fw = CopyFile{path: "c:\\file.txt"}
-	//require.Error(t, fw.checkWrite(), "Testing create file in c:\\")
-	fw = CopyFile{path: "/etc/file.txt"}
-	require.Error(t, fw.checkWrite(), "Testing create file in /etc/")
-
-	fw.handle.Close()
-}
-
-func TestProgessPrint(t *testing.T) {
-
+	dstFile := structFile{path: wrongName}
+	require.Error(t, dstFile.checkWrite(), "Testing create file in %s", wrongName)
+	dstFile.Close()
+	cleanupTestEnviromnent(workDir)
 }
 
 func TestCopy(t *testing.T) {
-	//require.Error(t, Copy("c:\\file.txt", "c:\\file2.txt", 0, 100), "Open not existing file and try to write to forbidden dir")
-	require.Error(t, Copy("/home/user/some_src_file", "/home/user/some_dst_file", 0, 100), "Open not existing file and try to write to forbidden dir")
-
-	err := Copy("/home/user/test-file", "/home/user/dst_file", 100, 0)
+	//var test_file1, test_file2, wrong_file, test_dir string = LINUXTESTFILENAME, LINUXTESTFILENAME2, WIN_WRONG_FILENAME, LINUX_DIR
+	workDir, err := createTestEnviromnent()
 	if err != nil {
-		t.Fatalf("Error copying big file")
+		t.Fatalf("Error on create test enviromnent")
 	}
+	wrongName := getWrongName(os_type)
+	big_file, small_file := testFiles[1], testFiles[0]
+	bigFileName := path.Join(workDir, big_file.name)
 
-	err = createTestFile(LINUXTESTFILENAME, int32(TESTFILESIZE))
-	if err != nil {
-		t.Fatalf("Error on creating file: %v", err)
-	}
-	require.Error(t, Copy(LINUXTESTFILENAME, "/etc/test.txt", 0, 10000), "Try to copy existing file to forbidden place")
+	require.Error(t, Copy(
+		bigFileName+"_not_existed",
+		wrongName,
+		0, 100), "Open not existing file and try to write to forbidden dir")
 
-	err = createTestFile(LINUXTESTFILENAME, int32(TESTFILESIZE2))
-	if err != nil {
-		t.Fatalf("ERror on creating temp file: %v", err)
-	}
-	err = Copy(LINUXTESTFILENAME, LINUXTESTFILENAME, 0, 100000000)
-	if err != nil {
-		t.Fatalf("Error on copy files: %v", err)
-	}
+	require.Nil(t, Copy(
+		path.Join(workDir, small_file.name),
+		path.Join(workDir, small_file.name+"_dst"),
+		100, 0), "Copying created valid file to valid place")
 
-	f, err := os.OpenFile(LINUXTESTFILENAME, os.O_RDONLY, 0666)
+	require.Error(t, Copy(
+		bigFileName,
+		wrongName,
+		0, 10000), "Try to copy existing file to forbidden place")
+
+	var offset, count uint64 = 0x100, 0
+	require.Nil(t, Copy(
+		bigFileName,
+		bigFileName+"_dst",
+		offset, count), "Test copying big file to valid place from offset")
+
+	f, err := os.OpenFile(bigFileName+"_dst", os.O_RDONLY, 0666)
 	if err != nil {
 		t.Fatalf("Error open writed file for test it size")
 	}
@@ -129,8 +181,10 @@ func TestCopy(t *testing.T) {
 	if err != nil {
 		t.Fatal("Error receive stat from writed file")
 	}
-	require.Equal(t, writedFileState.Size(), int64(TESTFILESIZE2), "Testing then len(writed file) == len(source file)")
+
+	require.Equal(t, uint64(writedFileState.Size()), big_file.size-offset, "Testing then len(writed file) == len(source file)")
 	f.Close()
-	os.Remove(LINUXTESTFILENAME)
-	os.Remove(LINUXTESTFILENAME)
+
+	cleanupTestEnviromnent(workDir)
+
 }
