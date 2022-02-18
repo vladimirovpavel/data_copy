@@ -1,4 +1,4 @@
-module data_copy
+module github.com/vladimirovpavel/data_copy
 
 go 1.17
 
